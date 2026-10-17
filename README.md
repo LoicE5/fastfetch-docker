@@ -8,16 +8,27 @@ and forwards its normal command-line arguments. Images are published as
 user or organization that owns this repository.
 
 ```sh
-docker run --rm ghcr.io/<owner>/fastfetch:alpine
+docker run --rm -t ghcr.io/<owner>/fastfetch:alpine
 docker run --rm ghcr.io/<owner>/fastfetch:alpine --version
 docker run --rm ghcr.io/<owner>/fastfetch:alpine --format json --structure OS
 ```
+
+Use `-t` for colored terminal output. Without a terminal, Fastfetch automatically
+disables some styling; the color swatches can still appear. Setting `TERM` alone
+does not allocate a terminal. Keep JSON commands without `-t`. For an ANSI-capable
+output stream without a terminal, pass `--pipe false` explicitly. Fastfetch's
+default colors apply to its logo and labels; ordinary values are usually white.
+Your host's custom Fastfetch configuration is not included in these images.
 
 ## Tags and platforms
 
 Linux tags support **linux/amd64 and linux/arm64**, except `arch` and `devuan`,
 whose selected base images currently support **linux/amd64 only**.
 `windows` supports **windows/amd64 only**.
+
+Multi-platform Linux tags also publish `<tag>-amd64` and `<tag>-arm64` aliases
+for their component images, giving those GHCR versions readable names. The
+ordinary `<tag>` still selects the appropriate architecture automatically.
 
 | Tag | Base / build source | Installation |
 | --- | --- | --- |
@@ -89,7 +100,7 @@ Run from the repository root with Docker and Buildx available:
 ```sh
 docker build --pull --file alpine.dockerfile --tag fastfetch:alpine .
 docker run --rm fastfetch:alpine --version
-docker run --rm fastfetch:alpine
+docker run --rm -t fastfetch:alpine
 docker run --rm fastfetch:alpine --format json --structure OS
 node .github/scripts/verify-linux.mjs fastfetch:alpine linux/arm64 alpine.dockerfile
 ```
@@ -123,7 +134,16 @@ for Server Core LTSC 2025. In PowerShell on that host:
 ```powershell
 docker build --pull --file windows.dockerfile --tag fastfetch:windows .
 ./.github/scripts/verify-windows.ps1 -Image fastfetch:windows
+docker run --rm -t fastfetch:windows
 ```
+
+Check `docker info --format '{{.OSType}}'`: it must print `windows` for this tag.
+On a supported Windows machine, switch Docker Desktop to **Windows containers**.
+Linux containers on Windows (WSL2 included), Linux hosts, and macOS cannot run
+this Windows image. `--platform windows/amd64` does not add a Windows kernel.
+An extraction failure mentioning `overlayfs` and Windows paths indicates the
+Windows image is being handled by a Linux daemon; use a compatible Windows
+container host. Linux distro tags continue to require a Linux daemon.
 
 ## Verification helpers
 
@@ -132,7 +152,9 @@ The workflow uses small scripts that can also run locally:
 - [discover.mjs](.github/scripts/discover.mjs) finds Dockerfiles and selects their architectures.
 - [verify-linux.mjs](.github/scripts/verify-linux.mjs) checks Fastfetch execution and Linux distro identity.
 - [verify-manifest.mjs](.github/scripts/verify-manifest.mjs) checks published image platforms.
+- [tag-platforms.mjs](.github/scripts/tag-platforms.mjs) names the existing platform manifests without changing their digests.
 - [verify-windows.ps1](.github/scripts/verify-windows.ps1) checks Fastfetch execution and Windows identity.
+- [cleanup-ghcr.mjs](.github/scripts/cleanup-ghcr.mjs) previews or deletes obsolete GHCR versions while preserving referenced platform manifests.
 
 The `.mjs` scripts require Node.js; the Windows script uses PowerShell. The
 Dockerfiles can be built directly with Docker independently of these helpers.
@@ -180,3 +202,43 @@ open the owner's **Packages → fastfetch → Package settings → Change visibi
 and make the package public to allow anonymous pulls. All tags share that package.
 GitHub may delay scheduled runs. Scheduled workflows use the default branch;
 configure `main` as the repository's default branch to enable scheduled publishing.
+
+## GHCR digest entries and cleanup
+
+A multi-platform tag points to an image index, which references separate AMD64
+and ARM64 manifests. Without their own tags, GHCR lists those manifests as
+untagged `sha256:…` versions. They are required: deleting them breaks pulls for
+those architectures. For example, the two digest entries below `alpine` are its
+platform manifests. These are not
+build attestations; provenance and SBOM publication are already disabled.
+The workflow tags them as `alpine-amd64` and `alpine-arm64` (and similarly for
+other distros), so GHCR can show names instead of bare digests. It reuses the
+exact manifests; it does not rebuild or duplicate their layers. Single-platform
+tags already name their sole image and need no aliases.
+
+The new workflow applies these names on the next publication. To name an
+existing published tag without rebuilding it, log Docker in to GHCR with package
+write access and run, for example:
+
+```sh
+node .github/scripts/tag-platforms.mjs ghcr.io/loice5/fastfetch:alpine linux/amd64,linux/arm64
+```
+
+Add `--dry-run` to inspect the naming plan without writing to the registry.
+
+Old manifests no longer referenced by any tagged image can be removed. With
+Node.js, Docker Buildx, and the GitHub CLI installed, authenticate `gh` with
+`read:packages` and `delete:packages` scopes and package admin access. Private
+packages also require Docker to be logged in to GHCR. Stop publishing while
+running cleanup, then preview and delete eligible versions:
+
+```sh
+node .github/scripts/cleanup-ghcr.mjs loice5
+node .github/scripts/cleanup-ghcr.mjs loice5 --delete
+```
+
+Use `--org` for an organization-owned package. The script inventories all pages,
+walks every tagged image's manifest references, and aborts on inspection errors.
+It preserves tagged versions and their referenced manifests, even when those
+manifests have no tags of their own. It does not delete anything by default.
+If all digest entries are still referenced, there is nothing eligible to delete.

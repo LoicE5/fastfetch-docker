@@ -41,6 +41,9 @@ for (const platform of platformList.split(',')) {
   assert.match(version, /fastfetch\s+\d+\./i, 'Invalid version output');
   console.log(version);
   assert(run().length > 0, 'Default execution produced no output');
+  const terminal = docker(['run', '--rm', '--tty', '--platform', platform, image,
+    '--logo', 'none', '--structure', 'OS']);
+  assert.match(terminal, /\x1b\[[0-9;]*m/, 'Terminal output is missing ANSI styling');
   const modules = JSON.parse(run('--format', 'json', '--structure', 'OS'));
   const os = modules.find(module => module.type === 'OS');
   assert(os?.result && !os.error, `OS detection failed: ${JSON.stringify(modules)}`);

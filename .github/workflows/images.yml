@@ -87,6 +87,11 @@ jobs:
         env:
           PLATFORMS: ${{ matrix.platforms }}
         run: node .github/scripts/verify-manifest.mjs "$IMAGE" "$PLATFORMS"
+      - name: Give platform manifests readable tags
+        if: env.PUBLISH == 'true'
+        env:
+          PLATFORMS: ${{ matrix.platforms }}
+        run: node .github/scripts/tag-platforms.mjs "$IMAGE" "$PLATFORMS"
 
   windows:
     needs: discover
