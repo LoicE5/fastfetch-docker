@@ -3,21 +3,18 @@ name: Fastfetch images
 on:
   schedule:
     - cron: '17 4 1 * *'
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  REFRESH: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-  PUBLISH: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+  REFRESH: 'true'
+  PUBLISH: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
   discover:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
       image: ${{ steps.discover.outputs.image }}
@@ -29,7 +26,7 @@ jobs:
 
   linux:
     needs: discover
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
       contents: read

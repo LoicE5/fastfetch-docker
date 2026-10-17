@@ -1,4 +1,6 @@
-# Fastfetch images
+# Fastfetch container images
+
+Fastfetch packaged for 26 Linux environments and Windows Server Core.
 
 Each image runs [Fastfetch](https://github.com/fastfetch-cli/fastfetch) by default
 and forwards its normal command-line arguments. Images are published as
@@ -53,6 +55,11 @@ distributions. RPM and ZIP downloads resolve the current stable upstream release
 at build time. Linux downloads use the polyfilled RPMs for older glibc compatibility;
 Docker's `arm64` maps to upstream's `aarch64`.
 
+Base tags such as `9`, `2023`, and `ltsc2025` receive updates within their OS
+release. They are mutable tags, like `latest`; `latest` can also move to a new
+major release. Even when a base digest stays unchanged, a fresh build can install
+newer distribution packages or download a newer Fastfetch release.
+
 The `nix` tag uses the official **Nix image**, not a full NixOS system. Because its
 base omits `os-release`, the recipe adds an identity describing the Nix container
 so Fastfetch can return OS information. The `ubi9`
@@ -92,10 +99,7 @@ Some AMD64 emulators on ARM64 hosts cause XBPS in the Void glibc base to fail
 with HTTP 416 during repository sync
 ([upstream issue](https://github.com/void-linux/void-containers/issues/21)).
 Use a native AMD64 host for that build. The workflow uses native AMD64 execution
-for this platform. Local verification passed 49 of the 50 Linux platform
-combinations; this emulation failure prevented the remaining check. Windows
-installation and verification scripts were checked for syntax, but the Windows
-image requires the Windows runner for its build and runtime checks.
+for this platform.
 
 Windows images require a compatible
 [Windows container host](https://learn.microsoft.com/en-us/virtualization/windowscontainers/quick-start/set-up-environment)
@@ -106,12 +110,24 @@ docker build --pull --file windows.dockerfile --tag fastfetch:windows .
 ./.github/scripts/verify-windows.ps1 -Image fastfetch:windows
 ```
 
+## Verification helpers
+
+The workflow uses small scripts that can also run locally:
+
+- [discover.mjs](.github/scripts/discover.mjs) finds Dockerfiles and selects their architectures.
+- [verify-linux.mjs](.github/scripts/verify-linux.mjs) checks Fastfetch execution and Linux distro identity.
+- [verify-manifest.mjs](.github/scripts/verify-manifest.mjs) checks published image platforms.
+- [verify-windows.ps1](.github/scripts/verify-windows.ps1) checks Fastfetch execution and Windows identity.
+
+The `.mjs` scripts require Node.js; the Windows script uses PowerShell. The
+Dockerfiles can be built directly with Docker independently of these helpers.
+
 ## Automation and publication
 
-[The workflow](workflows/images.yml) runs on pushes to `main`, pull requests,
-manual dispatch, and at **04:17 UTC on the first of each month**. Scheduled and
-manual runs pull fresh base images and disable build-layer reuse. Other Linux
-runs use GitHub Actions caches scoped by distro. Windows uses the Docker CLI
+[The workflow](.github/workflows/images.yml) runs only by manual dispatch and at
+**04:17 UTC on the first of each month**. Every run pulls fresh base images and
+disables build-layer reuse. Linux jobs use `ubuntu-24.04`
+runners so runner upgrades are explicit. Windows uses the Docker CLI
 on a fresh `windows-2025` runner.
 
 Root-level `*.dockerfile` files are discovered automatically. Adding an ordinary
@@ -127,8 +143,8 @@ with the base where provided; UBI9 must still identify as RHEL and contain no
 package-manager executables or build tools. The Windows job performs the same
 three execution checks and validates Windows identity.
 
-Only runs on `main` publish. Pull requests build and test without logging in or
-pushing. The workflow pushes the image it tested, then inspects the registry
+Only runs on `main` publish. Manual runs on other branches build and test without
+logging in or pushing. The workflow pushes the image it tested, then inspects the registry
 manifest and requires exactly the expected platforms:
 
 ```sh
@@ -146,8 +162,5 @@ settings. Organization policies may restrict package creation or public visibili
 New GHCR packages are private by default. After the first successful publication,
 open the owner's **Packages → fastfetch → Package settings → Change visibility**
 and make the package public to allow anonymous pulls. All tags share that package.
-GitHub may delay scheduled runs; scheduled workflows use the default branch, so
-configure `main` as the default branch when creating the remote repository.
-
-This setup initializes local Git on `main`. It does not create a remote, commit,
-push, or publish images by itself.
+GitHub may delay scheduled runs. Scheduled workflows use the default branch;
+configure `main` as the repository's default branch to enable scheduled publishing.
