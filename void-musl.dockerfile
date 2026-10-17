@@ -1,4 +1,4 @@
-FROM ghcr.io/void-linux/void-musl:latest
+FROM ghcr.io/void-linux/void-musl-busybox:latest
 
 RUN xbps-install -Syu xbps \
     && xbps-install -Syu \

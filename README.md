@@ -19,27 +19,27 @@ Linux tags support **linux/amd64 and linux/arm64**, except `arch` and `devuan`,
 whose selected base images currently support **linux/amd64 only**.
 `windows` supports **windows/amd64 only**.
 
-| Tag | Base | Installation |
+| Tag | Base / build source | Installation |
 | --- | --- | --- |
 | `ubuntu` | `ubuntu:latest` | APT |
 | `debian` | `debian:stable-slim` | APT |
 | `alpine` | `alpine:latest` | APK |
-| `fedora` | `fedora:latest` | DNF |
-| `almalinux` | `almalinux:9` | DNF + EPEL |
+| `fedora` | `registry.fedoraproject.org/fedora-minimal:latest` | MicroDNF |
+| `almalinux` | `almalinux:9-minimal` | MicroDNF + EPEL |
 | `ubi9` | `registry.access.redhat.com/ubi9/ubi-micro:latest` | AlmaLinux 9 install-root builder + EPEL |
 | `arch` | `archlinux:latest` | Pacman |
-| `rockylinux` | `rockylinux/rockylinux:9` | DNF + EPEL |
-| `centos-stream` | `quay.io/centos/centos:stream9` | DNF + EPEL |
-| `oraclelinux` | `oraclelinux:9` | DNF + Oracle EPEL |
-| `amazonlinux` | `amazonlinux:2023` | Official polyfilled Fastfetch RPM through DNF |
+| `rockylinux` | `rockylinux/rockylinux:9-minimal` | MicroDNF + EPEL |
+| `centos-stream` | `quay.io/centos/centos:stream9-minimal` | MicroDNF + EPEL |
+| `oraclelinux` | `oraclelinux:9-slim` | MicroDNF + Oracle EPEL |
+| `amazonlinux` | `public.ecr.aws/amazonlinux/amazonlinux:2023-minimal` | MicroDNF for dependencies; official polyfilled Fastfetch RPM through RPM |
 | `opensuse` | `opensuse/tumbleweed:latest` | Zypper |
 | `opensuse-leap` | `opensuse/leap:latest` | Zypper |
 | `kali` | `kalilinux/kali-rolling:latest` | APT |
 | `parrot` | `parrotsec/core:latest` | APT |
 | `devuan` | `devuan/devuan:stable` | APT |
-| `void` | `ghcr.io/void-linux/void-glibc:latest` | XBPS |
-| `void-musl` | `ghcr.io/void-linux/void-musl:latest` | XBPS |
-| `gentoo` | `gentoo/stage3:latest` | Portage; prefer binaries, limited testing keywords, no optional desktop integrations |
+| `void` | `ghcr.io/void-linux/void-glibc-busybox:latest` | XBPS |
+| `void-musl` | `ghcr.io/void-linux/void-musl-busybox:latest` | XBPS |
+| `gentoo` | `gentoo/stage3:latest` (builder) | Portage packages installed into a separate runtime root; prefer binaries |
 | `nix` | `nixos/nix:latest` | Nix, installed into its executable profile |
 | `alt` | `alt:sisyphus` | APT-RPM |
 | `mageia` | `mageia:cauldron` | Urpmi |
@@ -66,6 +66,21 @@ so Fastfetch can return OS information. The `ubi9`
 tag retains the UBI micro root and RHEL release identity, but contains Fastfetch
 and dependencies from AlmaLinux/EPEL. It is not an entirely Red Hat-supplied
 image. Its final stage contains no package-manager executables or build tools.
+
+The RPM-based variants use smaller minimal/slim bases and MicroDNF where
+available. Amazon Linux uses RPM to install the downloaded Fastfetch package
+because MicroDNF does not support local RPM installation; dependency checking
+remains enabled. Both Void variants use their published BusyBox bases.
+
+Gentoo's final image contains a minimal Gentoo runtime assembled by Portage,
+including its package database and release identity. Its compiler, Portage, and
+repository tree stay in the build stage. An OCI base-name label records the source
+image so verification can still compare its distro identity.
+
+Gentoo and Nix omit optional desktop and multimedia integrations to reduce their
+runtime dependencies. Core Fastfetch output and OS JSON reporting remain
+available. Windows keeps Server Core because Nano Server's reduced API surface
+has not been verified for the official Fastfetch executable.
 
 ## Local builds and checks
 
@@ -141,7 +156,8 @@ to load all requested platforms. Every supported platform must pass `--version`,
 default execution, and an OS-information JSON check. Release identity is compared
 with the base where provided; UBI9 must still identify as RHEL and contain no
 package-manager executables or build tools. The Windows job performs the same
-three execution checks and validates Windows identity.
+three execution checks and validates Windows identity. Gentoo also verifies that
+its runtime excludes compiler and Portage executables.
 
 Only runs on `main` publish. Manual runs on other branches build and test without
 logging in or pushing. The workflow pushes the image it tested, then inspects the registry

@@ -1,4 +1,5 @@
 # escape=`
+# Server Core provides the Win32 API surface used by the official executable.
 FROM mcr.microsoft.com/windows/servercore:ltsc2025
 
 SHELL ["powershell", "-NoLogo", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]

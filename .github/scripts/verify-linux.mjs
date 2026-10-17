@@ -31,6 +31,11 @@ for (const platform of platformList.split(',')) {
   console.log(`Testing ${image} on ${platform}`);
   const metadata = JSON.parse(docker(['image', 'inspect', '--platform', platform, image]))[0];
   assert.equal(`${metadata.Os}/${metadata.Architecture}`, platform, 'Wrong loaded platform');
+  // A runtime assembled from packages records its source distro in the OCI label.
+  const identityBase = base === 'scratch'
+    ? metadata.Config.Labels?.['org.opencontainers.image.base.name'] : base;
+  assert(identityBase && identityBase !== 'scratch', 'Missing source distro image');
+  assert(stages.some(stage => stage[1] === identityBase), 'Source distro must be a declared build stage');
   const run = (...args) => docker(['run', '--rm', '--platform', platform, image, ...args]);
   const version = run('--version');
   assert.match(version, /fastfetch\s+\d+\./i, 'Invalid version output');
@@ -43,7 +48,7 @@ for (const platform of platformList.split(',')) {
 
   // Compare with the actual base rather than maintaining another distro list.
   const expected = releaseFields(docker(['run', '--rm', '--platform', platform,
-    '--entrypoint', '/bin/sh', base, '-c', releaseCommand]));
+    '--entrypoint', '/bin/sh', identityBase, '-c', releaseCommand]));
   const actual = releaseFields(docker(['run', '--rm', '--platform', platform,
     '--entrypoint', '/bin/sh', image, '-c', releaseCommand]));
   for (const key of ['ID', 'NAME', 'VERSION_ID']) {
@@ -56,6 +61,26 @@ for (const platform of platformList.split(',')) {
     docker(['run', '--rm', '--platform', platform, '--entrypoint', '/bin/sh', image,
       '-ec', 'for cmd in dnf yum microdnf rpm gcc cc make cmake; do '
         + 'if command -v "$cmd"; then exit 1; fi; done']);
+  }
+  if (file === 'gentoo.dockerfile') {
+    assert.equal(os.result.id, 'gentoo', 'Gentoo runtime lost its distro identity');
+    docker(['run', '--rm', '--platform', platform, '--entrypoint', '/bin/sh', image,
+      '-ec', 'for cmd in gcc cc g++ make cmake emerge; do '
+        + 'if command -v "$cmd"; then exit 1; fi; done']);
+  }
+  if (file === 'gentoo.dockerfile' || file === 'nix.dockerfile') {
+    const packages = JSON.parse(run('--format', 'json', '--structure', 'Packages'))
+      .find(module => module.type === 'Packages');
+    assert(packages?.result && !packages.error, 'Package detection failed');
+    if (file === 'gentoo.dockerfile') {
+      assert(Object.entries(packages.result).some(([key, value]) => key.startsWith('emerge') && value > 0),
+        'Missing Gentoo package database');
+    } else {
+      assert(Object.entries(packages.result).some(([key, value]) => key.startsWith('nix') && value > 0),
+        'Missing Nix profile package information');
+      docker(['run', '--rm', '--platform', platform, '--entrypoint', '/bin/sh', image,
+        '-ec', 'command -v nix-env; command -v fastfetch']);
+    }
   }
   console.log(`Passed ${platform}: ${os.result.prettyName || os.result.name}`);
 }
