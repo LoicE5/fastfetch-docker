@@ -1,0 +1,145 @@
+name: Fastfetch images
+
+on:
+  schedule:
+    - cron: '17 4 1 * *'
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REFRESH: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+  PUBLISH: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      image: ${{ steps.discover.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Discover root Dockerfiles
+        id: discover
+        run: node .github/scripts/discover.mjs
+
+  linux:
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    env:
+      IMAGE: ${{ needs.discover.outputs.image }}:${{ matrix.distro }}
+    steps:
+      - uses: actions/checkout@v7
+      # Docker's documented containerd image store supports multi-platform --load.
+      - uses: docker/setup-docker-action@v5
+        with:
+          daemon-config: |
+            {
+              "features": {
+                "containerd-snapshotter": true
+              }
+            }
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+      - name: Build and load every supported architecture
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: ${{ matrix.platforms }}
+          tags: ${{ env.IMAGE }}
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          pull: ${{ env.REFRESH == 'true' }}
+          no-cache: ${{ env.REFRESH == 'true' }}
+          cache-from: type=gha,scope=fastfetch-${{ matrix.distro }}
+          cache-to: type=gha,mode=max,scope=fastfetch-${{ matrix.distro }}
+      - name: Test each loaded platform and distro identity
+        env:
+          PLATFORMS: ${{ matrix.platforms }}
+          DOCKERFILE: ${{ matrix.file }}
+        run: node .github/scripts/verify-linux.mjs "$IMAGE" "$PLATFORMS" "$DOCKERFILE"
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the tested image
+        if: env.PUBLISH == 'true'
+        run: docker push "$IMAGE"
+      - name: Verify published platforms
+        if: env.PUBLISH == 'true'
+        env:
+          PLATFORMS: ${{ matrix.platforms }}
+        run: node .github/scripts/verify-manifest.mjs "$IMAGE" "$PLATFORMS"
+
+  windows:
+    needs: discover
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.discover.outputs.image }}:windows
+      # Use the Windows daemon's builder; Linux BuildKit cannot build WCOW images.
+      DOCKER_BUILDKIT: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require a Windows container host
+        shell: pwsh
+        run: |
+          $os = docker info --format '{{.OSType}}'
+          if ($LASTEXITCODE -ne 0 -or $os -ne 'windows') {
+            throw 'This job requires a Windows container host compatible with Server Core LTSC 2025.'
+          }
+      - name: Build Windows AMD64
+        shell: pwsh
+        run: |
+          $buildArgs = @('build', '--platform', 'windows/amd64', '--file', 'windows.dockerfile', '--tag', $env:IMAGE)
+          if ($env:REFRESH -eq 'true') { $buildArgs += @('--pull', '--no-cache') }
+          $buildArgs += '.'
+          & docker @buildArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+      - name: Test Windows image
+        shell: pwsh
+        run: ./.github/scripts/verify-windows.ps1 -Image $env:IMAGE
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          $env:GHCR_TOKEN | docker login ghcr.io --username $env:GHCR_USER --password-stdin
+          if ($LASTEXITCODE -ne 0) { throw 'GHCR login failed' }
+      - name: Push the tested Windows image
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        run: |
+          docker push $env:IMAGE
+          if ($LASTEXITCODE -ne 0) { throw 'Windows push failed' }
+      - name: Verify published platform
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        run: |
+          node .github/scripts/verify-manifest.mjs $env:IMAGE windows/amd64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows manifest verification failed' }
