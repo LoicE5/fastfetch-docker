@@ -106,13 +106,35 @@ jobs:
       DOCKER_BUILDKIT: '0'
     steps:
       - uses: actions/checkout@v7
-      - name: Require a Windows container host
+      - name: Start and verify Windows Docker
         shell: pwsh
+        timeout-minutes: 3
         run: |
-          $os = docker info --format '{{.OSType}}'
-          if ($LASTEXITCODE -ne 0 -or $os -ne 'windows') {
-            throw 'This job requires a Windows container host compatible with Server Core LTSC 2025.'
-          }
+          $deadline = [DateTime]::UtcNow.AddSeconds(120)
+
+          do {
+            $service = Get-Service docker -ErrorAction Stop
+            if ($service.Status -eq 'Stopped') {
+              try {
+                Start-Service docker -ErrorAction Stop
+              } catch {
+                Write-Host "Docker startup failed; retrying: $_"
+              }
+            }
+
+            $os = docker info --format '{{.OSType}}' 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              if ($os -ne 'windows') {
+                throw "Expected Windows Docker engine; got '$os'."
+              }
+              exit 0
+            }
+
+            Start-Sleep -Seconds 2
+          } while ([DateTime]::UtcNow -lt $deadline)
+
+          Get-Service docker | Format-List *
+          throw 'Windows Docker engine did not become ready within 120 seconds.'
       - name: Build Windows AMD64
         shell: pwsh
         run: |
